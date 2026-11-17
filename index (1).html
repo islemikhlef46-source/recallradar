@@ -1,0 +1,1437 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RecallRadar — Turn your notes into precision practice</title>
+<meta name="description" content="Paste your lecture notes. RecallRadar builds an instant quiz, scores you in real time, then hunts down exactly what you don't know.">
+<meta name="theme-color" content="#05070d">
+<!--
+  RecallRadar — built for Teens Hack Houston Hackathon 2026 (theme: "a more efficient way to live")
+  Single-file web app: zero external dependencies, zero network requests, runs fully offline.
+  Interface, question engine, radar artwork and the capybara are original hand-built work.
+-->
+<style>
+  :root{
+    --bg:#05070d;
+    --panel:rgba(15,23,44,.55);
+    --panel2:rgba(11,17,34,.78);
+    --line:rgba(122,150,208,.16);
+    --line2:rgba(122,150,208,.30);
+    --text:#e9f1ff;
+    --muted:#95a7cb;
+    --faint:#5e7096;
+    --green:#3bf0a8;
+    --cyan:#3fd6ff;
+    --amber:#ffb454;
+    --red:#ff5d73;
+    --grad:linear-gradient(92deg,#3bf0a8,#3fd6ff);
+    --r:18px;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,"Liberation Mono",monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  *{margin:0;padding:0;box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{
+    font-family:var(--sans);
+    background:var(--bg);
+    color:var(--text);
+    min-height:100vh;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+  }
+  body.revenge{--cyan:#ffb454;--green:#ffb454;--grad:linear-gradient(92deg,#ffb454,#ff7a5c)}
+
+  /* ambient background */
+  .bg-grid{
+    position:fixed;inset:0;z-index:-2;
+    background-image:linear-gradient(rgba(122,150,208,.05) 1px,transparent 1px),
+                     linear-gradient(90deg,rgba(122,150,208,.05) 1px,transparent 1px);
+    background-size:44px 44px;
+    mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 30%,transparent 75%);
+    -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,#000 30%,transparent 75%);
+  }
+  .orb{position:fixed;border-radius:50%;filter:blur(90px);z-index:-1;opacity:.5;pointer-events:none}
+  .orb-a{width:520px;height:520px;left:-160px;top:-180px;background:radial-gradient(circle,rgba(59,240,168,.16),transparent 65%)}
+  .orb-b{width:620px;height:620px;right:-220px;top:16%;background:radial-gradient(circle,rgba(63,214,255,.13),transparent 65%)}
+
+  .wrap{max-width:1180px;margin:0 auto;padding:clamp(16px,4vw,36px)}
+
+  /* top bar */
+  .top{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap}
+  .brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);letter-spacing:.14em;font-size:.92rem}
+  .brand b{color:var(--cyan);font-weight:600}
+  .brand svg{flex:0 0 auto}
+  .stats{display:flex;gap:8px;flex-wrap:wrap}
+  .stat-chip{font-family:var(--mono);font-size:.72rem;color:var(--faint);border:1px solid var(--line);border-radius:999px;padding:6px 12px;background:rgba(10,16,32,.5)}
+  .stat-chip b{color:var(--muted);font-weight:600}
+
+  /* screens container (3D stage) */
+  .screens{perspective:1400px;margin-top:clamp(10px,2vw,18px)}
+  .screen{display:none}
+  .screen.active{display:block;animation:flipIn .5s cubic-bezier(.2,.8,.25,1)}
+  @keyframes flipIn{
+    from{opacity:0;transform:rotateX(-10deg) translateY(18px)}
+    to{opacity:1;transform:none}
+  }
+
+  /* hero */
+  .hero{display:grid;grid-template-columns:1.08fr .92fr;gap:clamp(24px,4.5vw,58px);align-items:center;padding-top:clamp(26px,5.5vw,64px)}
+  .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.22em;color:var(--green);margin-bottom:16px}
+  .kicker::before{content:"";display:inline-block;width:22px;height:1px;background:var(--green);margin-right:10px;vertical-align:middle}
+  h1{font-size:clamp(1.9rem,4.6vw,3.3rem);line-height:1.06;letter-spacing:-.022em;font-weight:700}
+  .grad-text{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .sub{color:var(--muted);max-width:54ch;font-size:clamp(.98rem,1.35vw,1.1rem);line-height:1.75;margin-top:18px}
+  .sub b{color:var(--text);font-weight:600}
+  .steps{display:flex;gap:12px;margin-top:30px;flex-wrap:wrap}
+  .step{
+    display:flex;align-items:center;gap:10px;
+    background:var(--panel);border:1px solid var(--line);border-radius:14px;
+    padding:12px 16px;backdrop-filter:blur(8px);
+  }
+  .step b{font-family:var(--mono);font-size:.78rem;color:var(--cyan);font-weight:600}
+  .step span{font-size:.86rem;color:var(--muted);white-space:nowrap}
+
+  /* animated radar disc */
+  .hero-radar{position:relative}
+  .radar{
+    position:relative;aspect-ratio:1/1;max-width:400px;margin:0 auto;border-radius:50%;
+    background:
+      repeating-radial-gradient(circle at 50% 50%,rgba(63,214,255,.10) 0 1px,transparent 1px 25%),
+      radial-gradient(circle at 50% 50%,rgba(63,214,255,.05),rgba(6,10,20,.6) 72%);
+    border:1px solid rgba(63,214,255,.22);
+    box-shadow:0 0 80px rgba(63,214,255,.08),inset 0 0 70px rgba(63,214,255,.05);
+    overflow:hidden;
+  }
+  .radar::before,.radar::after{
+    content:"";position:absolute;background:rgba(63,214,255,.14);
+  }
+  .radar::before{left:50%;top:0;bottom:0;width:1px}
+  .radar::after{top:50%;left:0;right:0;height:1px}
+  .sweep{
+    position:absolute;inset:0;border-radius:50%;
+    background:conic-gradient(from 0deg,rgba(59,240,168,.0) 0deg,rgba(59,240,168,.05) 300deg,rgba(59,240,168,.42) 355deg,rgba(59,240,168,.55) 360deg);
+    animation:spin 3.8s linear infinite;
+  }
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .radar-core{
+    position:absolute;left:50%;top:50%;width:10px;height:10px;margin:-5px 0 0 -5px;border-radius:50%;
+    background:var(--green);box-shadow:0 0 18px rgba(59,240,168,.9),0 0 44px rgba(59,240,168,.4);
+    animation:corePulse 2.2s ease-in-out infinite;
+  }
+  @keyframes corePulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.35);opacity:.75}}
+  .blip{
+    position:absolute;width:9px;height:9px;border-radius:50%;background:var(--green);
+    box-shadow:0 0 12px rgba(59,240,168,.9);animation:ping 2.6s ease-out infinite;
+  }
+  .blip-b{background:var(--cyan);box-shadow:0 0 12px rgba(63,214,255,.9)}
+  @keyframes ping{0%{transform:scale(.4);opacity:.2}18%{transform:scale(1.5);opacity:1}45%{transform:scale(1);opacity:.85}100%{transform:scale(.4);opacity:.2}}
+  .radar-tag{
+    position:absolute;left:50%;bottom:7%;transform:translateX(-50%);
+    font-family:var(--mono);font-size:.62rem;letter-spacing:.28em;color:var(--faint);white-space:nowrap;
+  }
+
+  /* tool card */
+  .tool{
+    margin-top:clamp(34px,6vw,66px);
+    background:var(--panel2);border:1px solid var(--line2);border-radius:22px;
+    padding:clamp(18px,3vw,30px);backdrop-filter:blur(12px);
+    box-shadow:0 24px 70px rgba(0,0,0,.45);
+    position:relative;
+  }
+  .tool::before{
+    content:"";position:absolute;inset:-1px;border-radius:23px;padding:1px;pointer-events:none;
+    background:linear-gradient(120deg,rgba(59,240,168,.5),transparent 30%,transparent 70%,rgba(63,214,255,.5));
+    -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);
+    -webkit-mask-composite:xor;mask-composite:exclude;
+  }
+  .tool-head{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:14px}
+  .tool-head h2{font-size:clamp(1.1rem,2vw,1.35rem);letter-spacing:-.01em}
+  .tool-note{font-family:var(--mono);font-size:.7rem;color:var(--faint);letter-spacing:.08em}
+  textarea{
+    width:100%;min-height:190px;resize:vertical;
+    background:rgba(5,9,18,.65);border:1px solid var(--line);border-radius:14px;
+    color:var(--text);font-family:var(--sans);font-size:.95rem;line-height:1.7;padding:16px 18px;
+    outline:none;transition:border-color .2s,box-shadow .2s;
+  }
+  textarea:focus{border-color:rgba(63,214,255,.55);box-shadow:0 0 0 3px rgba(63,214,255,.12)}
+  textarea::placeholder{color:var(--faint)}
+  .tool-actions{display:flex;align-items:center;gap:14px;margin-top:14px;flex-wrap:wrap}
+  .samples{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.82rem;color:var(--faint)}
+  .chip{
+    background:rgba(10,16,32,.6);border:1px solid var(--line);color:var(--muted);
+    font-size:.8rem;border-radius:999px;padding:7px 14px;cursor:pointer;transition:.18s;font-family:var(--sans);
+  }
+  .chip:hover{border-color:rgba(63,214,255,.5);color:var(--text);transform:translateY(-1px)}
+  .counter{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-left:auto}
+
+  /* buttons */
+  .btn{
+    display:inline-flex;align-items:center;gap:9px;border-radius:13px;cursor:pointer;
+    font-family:var(--sans);font-weight:600;font-size:.94rem;padding:13px 22px;
+    transition:transform .16s,box-shadow .16s,background .16s,border-color .16s;
+  }
+  .btn-primary{
+    background:var(--grad);color:#04121c;border:0;
+    box-shadow:0 10px 34px rgba(59,240,168,.28);
+  }
+  .btn-primary:hover{transform:translateY(-2px);box-shadow:0 16px 44px rgba(59,240,168,.38)}
+  .btn-primary:active{transform:translateY(0)}
+  .btn-primary:disabled{opacity:.55;cursor:default;transform:none}
+  .btn-ghost{background:rgba(10,16,32,.55);border:1px solid var(--line2);color:var(--text)}
+  .btn-ghost:hover{border-color:rgba(63,214,255,.55);transform:translateY(-2px)}
+  .linklike{background:none;border:0;color:var(--faint);font-size:.8rem;cursor:pointer;font-family:var(--sans);text-decoration:underline;text-underline-offset:3px}
+  .linklike:hover{color:var(--muted)}
+
+  /* how-it-works */
+  .how{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:clamp(34px,6vw,60px)}
+  .hcard{
+    background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+    padding:24px 22px;backdrop-filter:blur(8px);transition:border-color .2s;
+  }
+  .hcard:hover{border-color:rgba(63,214,255,.4)}
+  .hcard svg{margin-bottom:14px}
+  .hcard h3{font-size:1.02rem;margin-bottom:8px;letter-spacing:-.01em}
+  .hcard p{color:var(--muted);font-size:.87rem;line-height:1.7}
+
+  /* quiz */
+  .qhead{display:flex;justify-content:space-between;align-items:center;gap:14px;flex-wrap:wrap;margin-top:clamp(14px,3vw,26px)}
+  .segments{display:flex;gap:4px;flex:1;min-width:180px}
+  .seg{height:4px;flex:1;border-radius:99px;background:rgba(122,150,208,.18);transition:background .25s}
+  .seg.done{background:var(--green)}
+  .seg.fail{background:var(--red)}
+  body.revenge .seg.done{background:var(--amber)}
+  .qhead-right{display:flex;align-items:center;gap:10px}
+  .qcount{font-family:var(--mono);font-size:.76rem;color:var(--faint);letter-spacing:.1em}
+  .streak{
+    display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:.74rem;
+    color:var(--amber);border:1px solid rgba(255,180,84,.4);border-radius:999px;padding:6px 12px;
+    background:rgba(255,180,84,.08);animation:popIn .3s cubic-bezier(.2,1.6,.4,1);
+  }
+  @keyframes popIn{from{transform:scale(.6);opacity:0}to{transform:scale(1);opacity:1}}
+  .qcard{
+    margin-top:18px;background:var(--panel2);border:1px solid var(--line2);border-radius:22px;
+    padding:clamp(20px,3.4vw,34px);backdrop-filter:blur(12px);box-shadow:0 24px 70px rgba(0,0,0,.45);
+  }
+  .qtype{font-family:var(--mono);font-size:.68rem;letter-spacing:.26em;color:var(--cyan);margin-bottom:16px}
+  body.revenge .qtype{color:var(--amber)}
+  .qtext{font-size:clamp(1.12rem,2.3vw,1.5rem);line-height:1.55;font-weight:600;letter-spacing:-.01em}
+  .qtext .blank{font-family:var(--mono);color:var(--cyan);letter-spacing:.1em}
+  body.revenge .qtext .blank{color:var(--amber)}
+  .opts{display:grid;gap:11px;margin-top:24px}
+  .opt{
+    display:flex;align-items:center;gap:14px;text-align:left;width:100%;
+    background:rgba(10,16,32,.55);border:1px solid var(--line);border-radius:14px;
+    color:var(--text);font-family:var(--sans);font-size:.96rem;line-height:1.5;
+    padding:15px 18px;cursor:pointer;transition:transform .15s,border-color .15s,background .15s,box-shadow .15s;
+  }
+  .opt:hover:not(:disabled){transform:translateX(5px);border-color:rgba(63,214,255,.55)}
+  .opt:disabled{cursor:default;opacity:.5}
+  .opt .key{
+    flex:0 0 auto;width:28px;height:28px;border-radius:9px;display:grid;place-items:center;
+    font-family:var(--mono);font-size:.74rem;color:var(--cyan);
+    border:1px solid rgba(63,214,255,.35);background:rgba(63,214,255,.07);
+  }
+  .opt.is-correct{
+    opacity:1;border-color:rgba(59,240,168,.75);background:rgba(59,240,168,.1);
+    box-shadow:0 0 26px rgba(59,240,168,.15);transform:none;
+  }
+  .opt.is-correct .key{color:var(--green);border-color:rgba(59,240,168,.6);background:rgba(59,240,168,.1)}
+  .opt.is-wrong{
+    opacity:1;border-color:rgba(255,93,115,.75);background:rgba(255,93,115,.09);
+    animation:shake .32s cubic-bezier(.36,.07,.19,.97);transform:none;
+  }
+  .opt.is-wrong .key{color:var(--red);border-color:rgba(255,93,115,.6);background:rgba(255,93,115,.1)}
+  @keyframes shake{10%,90%{transform:translateX(-2px)}20%,80%{transform:translateX(4px)}30%,50%,70%{transform:translateX(-5px)}40%,60%{transform:translateX(5px)}}
+  .explain{
+    display:none;margin-top:18px;padding:14px 16px;border-radius:12px;
+    border-left:3px solid var(--cyan);background:rgba(63,214,255,.06);
+    color:var(--muted);font-size:.87rem;line-height:1.7;
+  }
+  .explain.show{display:block;animation:fadeUp .3s ease}
+  .explain b{color:var(--text)}
+  @keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+  .nextrow{display:flex;justify-content:flex-end;margin-top:20px}
+  .quitrow{display:flex;justify-content:center;margin-top:18px}
+</style>
+
+<style>
+  /* results */
+  .res-head{display:grid;grid-template-columns:1fr 1fr;gap:clamp(20px,4vw,44px);align-items:center;margin-top:clamp(16px,3vw,30px)}
+  .res-label{font-family:var(--mono);font-size:.7rem;letter-spacing:.3em;color:var(--faint);margin-bottom:8px}
+  .res-score{font-family:var(--mono);font-size:clamp(3rem,7vw,4.8rem);font-weight:700;letter-spacing:-.03em;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1}
+  .verdict{color:var(--muted);font-size:1.02rem;line-height:1.65;margin-top:14px;max-width:44ch}
+  .res-radarbox{position:relative;background:var(--panel2);border:1px solid var(--line);border-radius:22px;padding:clamp(14px,2.4vw,22px);backdrop-filter:blur(10px)}
+  #radarChart svg{width:100%;height:auto;display:block}
+  #radarChart text{font-family:var(--mono);font-size:10px;fill:var(--muted);letter-spacing:.03em}
+  #radarChart text.weak{fill:var(--amber)}
+  #radarChart text.strong{fill:var(--green)}
+  #radarChart .axis{stroke:rgba(122,150,208,.18);stroke-width:1}
+  #radarChart .ring{fill:none;stroke:rgba(122,150,208,.14);stroke-width:1}
+  #radarChart .poly{fill:rgba(63,214,255,.16);stroke:var(--cyan);stroke-width:2;stroke-linejoin:round}
+  body.revenge #radarChart .poly{fill:rgba(255,180,84,.14);stroke:var(--amber)}
+  #radarChart .dot{fill:var(--green)}
+  #radarChart .dot.weak{fill:var(--amber);animation:dotPulse 1.6s ease-out infinite}
+  @keyframes dotPulse{0%{opacity:1}50%{opacity:.35}100%{opacity:1}}
+  .capy-wrap{position:absolute;right:10px;bottom:6px;cursor:pointer;line-height:0}
+  .capy{filter:drop-shadow(0 4px 10px rgba(0,0,0,.5));transition:transform .2s}
+  .capy:hover{transform:scale(1.08)}
+  .capy.spotted{animation:capyBounce .8s cubic-bezier(.2,1.8,.4,1)}
+  @keyframes capyBounce{0%{transform:scale(1)}30%{transform:scale(1.3) rotate(-6deg)}55%{transform:scale(.92) rotate(4deg)}100%{transform:scale(1)}}
+  .concepts{display:flex;gap:9px;flex-wrap:wrap;margin-top:clamp(18px,3vw,26px)}
+  .cchip{
+    display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.74rem;
+    border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--muted);
+    background:rgba(10,16,32,.5);
+  }
+  .cchip.weak{border-color:rgba(255,180,84,.5);color:var(--amber);background:rgba(255,180,84,.07)}
+  .cchip.strong{border-color:rgba(59,240,168,.45);color:var(--green);background:rgba(59,240,168,.06)}
+  .res-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:clamp(22px,3.4vw,32px)}
+  .res-note{color:var(--faint);font-size:.85rem;margin-top:16px;line-height:1.7}
+
+  /* scan overlay */
+  .scan{position:fixed;inset:0;z-index:60;display:grid;place-items:center;background:rgba(3,5,10,.78);backdrop-filter:blur(8px)}
+  .scan[hidden]{display:none}
+  .scan-card{background:var(--panel2);border:1px solid var(--line2);border-radius:22px;padding:34px 44px;text-align:center;box-shadow:0 30px 90px rgba(0,0,0,.6)}
+  .scan-radar{position:relative;width:110px;height:110px;margin:0 auto 20px;border-radius:50%;overflow:hidden;border:1px solid rgba(63,214,255,.25);background:radial-gradient(circle,rgba(63,214,255,.06),rgba(6,10,20,.6) 75%)}
+  .scan-radar::before{content:"";position:absolute;left:50%;top:0;bottom:0;width:1px;background:rgba(63,214,255,.15)}
+  .scan-msg{font-family:var(--mono);font-size:.82rem;color:var(--muted);letter-spacing:.06em;min-width:240px}
+  .scan-msg::after{content:"…";animation:dots 1.2s steps(4) infinite}
+  @keyframes dots{0%{content:""}25%{content:"."}50%{content:".."}75%{content:"..."}}
+
+  /* toast */
+  .toast{
+    position:fixed;left:50%;bottom:28px;transform:translate(-50%,20px);z-index:70;
+    background:#0d1526;border:1px solid var(--line2);color:var(--text);
+    border-radius:14px;padding:13px 20px;font-size:.88rem;line-height:1.5;max-width:min(90vw,480px);
+    box-shadow:0 18px 50px rgba(0,0,0,.55);opacity:0;pointer-events:none;transition:.3s;
+  }
+  .toast.show{opacity:1;transform:translate(-50%,0)}
+
+  /* modal */
+  .modal{position:fixed;inset:0;z-index:80;display:grid;place-items:center;background:rgba(3,5,10,.75);backdrop-filter:blur(8px);padding:20px}
+  .modal[hidden]{display:none}
+  .modal-card{background:var(--panel2);border:1px solid var(--line2);border-radius:20px;padding:clamp(22px,4vw,34px);max-width:560px;box-shadow:0 30px 90px rgba(0,0,0,.6);animation:flipIn .35s cubic-bezier(.2,.8,.25,1)}
+  .modal-card h3{font-size:1.15rem;margin-bottom:14px}
+  .modal-card p{color:var(--muted);font-size:.9rem;line-height:1.75;margin-bottom:12px}
+  .modal-card ul{margin:0 0 18px;padding-left:20px;color:var(--muted);font-size:.88rem;line-height:1.9}
+
+  /* footer */
+  .foot{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;margin-top:clamp(36px,7vw,72px);padding:22px 0 8px;border-top:1px solid var(--line);color:var(--faint);font-size:.8rem}
+  .foot b{color:var(--muted)}
+  .foot i{color:var(--cyan);font-style:italic}
+  body.revenge .foot i{color:var(--amber)}
+
+  /* responsive */
+  @media (max-width:880px){
+    .hero{grid-template-columns:1fr;gap:34px;padding-top:22px}
+    .hero-radar{order:-1}
+    .radar{max-width:270px}
+    .radar-tag{letter-spacing:.16em}
+    .how{grid-template-columns:1fr}
+    .res-head{grid-template-columns:1fr}
+    .res-radarbox{max-width:480px;margin:0 auto;width:100%}
+    .counter{margin-left:0;width:100%}
+  }
+  @media (max-width:560px){
+    .wrap{padding:16px 14px}
+    .opt{padding:13px 14px;font-size:.9rem;gap:10px}
+    .opt .key{width:24px;height:24px;font-size:.68rem}
+    .steps{gap:8px}
+    .step{padding:10px 12px}
+    .step span{white-space:normal;font-size:.8rem}
+    .tool-actions{gap:10px}
+    .btn{padding:12px 18px;font-size:.9rem;width:100%;justify-content:center}
+    .samples{width:100%}
+    .res-actions .btn{width:100%;justify-content:center}
+    .scan-card{padding:26px 22px}
+    .scan-msg{min-width:0;font-size:.74rem}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .sweep,.blip,.radar-core,.seg,.capy.spotted,.screen.active,.explain.show,.streak{animation:none!important}
+    *{transition-duration:.01ms!important}
+  }
+  [hidden]{display:none!important}
+</style>
+
+</head>
+<body>
+<div class="bg-grid" aria-hidden="true"></div>
+<div class="orb orb-a" aria-hidden="true"></div>
+<div class="orb orb-b" aria-hidden="true"></div>
+
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        <circle cx="11" cy="11" r="10" stroke="#3fd6ff" stroke-opacity=".5" stroke-width="1.4"/>
+        <circle cx="11" cy="11" r="5.5" stroke="#3fd6ff" stroke-opacity=".35" stroke-width="1.2"/>
+        <path d="M11 11 L11 1 A10 10 0 0 1 18.5 4.5 Z" fill="#3bf0a8" fill-opacity=".55"/>
+        <circle cx="11" cy="11" r="1.6" fill="#3bf0a8"/>
+      </svg>
+      <span>RECALL<b>RADAR</b></span>
+    </div>
+    <div class="stats" id="statChips"></div>
+  </header>
+
+  <main class="screens" id="screens">
+
+    <!-- ============ HOME ============ -->
+    <section class="screen active" id="screen-home">
+      <div class="hero">
+        <div class="hero-copy">
+          <div class="kicker">TEENS HACK HOUSTON · TECH TRACK · 2026</div>
+          <h1>Turn messy notes into a <span class="grad-text">precision quiz</span> — in seconds.</h1>
+          <p class="sub">Paste your lecture notes. RecallRadar builds an interactive quiz from them instantly, scores you in real time, then <b>pins down exactly what you don't know</b> — and sends you back in for a revenge round aimed only at your weak spots.</p>
+          <div class="steps">
+            <div class="step"><b>01</b><span>Paste your notes</span></div>
+            <div class="step"><b>02</b><span>Play the instant quiz</span></div>
+            <div class="step"><b>03</b><span>Hunt your weak spots</span></div>
+          </div>
+        </div>
+        <div class="hero-radar" aria-hidden="true">
+          <div class="radar">
+            <div class="sweep"></div>
+            <span class="blip" style="left:30%;top:26%;animation-delay:0s"></span>
+            <span class="blip blip-b" style="left:66%;top:56%;animation-delay:.9s"></span>
+            <span class="blip" style="left:44%;top:74%;animation-delay:1.7s"></span>
+            <span class="blip blip-b" style="left:20%;top:58%;animation-delay:1.2s"></span>
+            <div class="radar-core"></div>
+            <div class="radar-tag">ACTIVE RECALL · LIVE</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tool" id="tool">
+        <div class="tool-head">
+          <h2>Feed the radar</h2>
+          <span class="tool-note">WORKS OFFLINE · NOTHING LEAVES YOUR DEVICE</span>
+        </div>
+        <textarea id="notes" spellcheck="false" placeholder="Paste your lecture notes, a chapter summary, or a revision sheet — bullet points, paragraphs, messy text, anything.&#10;&#10;Example:  Photosynthesis is the process by which plants convert light energy into glucose. The Calvin cycle takes place in the stroma and needs 6 turns to build one glucose molecule…"></textarea>
+        <div class="tool-actions">
+          <button class="btn btn-primary" id="btnScan">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="7" stroke="#04121c" stroke-width="1.6" stroke-opacity=".8"/><path d="M8 8V2" stroke="#04121c" stroke-width="1.8" stroke-linecap="round"/><circle cx="8" cy="8" r="1.4" fill="#04121c"/></svg>
+            Scan my notes
+          </button>
+          <div class="samples">
+            <span>or try:</span>
+            <button class="chip" data-sample="bio">Biology 101</button>
+            <button class="chip" data-sample="psych">Psych 101</button>
+            <button class="chip" data-sample="econ">Econ 203</button>
+          </div>
+          <span class="counter" id="wordCount">0 words</span>
+        </div>
+      </div>
+
+      <div class="how">
+        <div class="hcard">
+          <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><circle cx="15" cy="15" r="12" stroke="#3bf0a8" stroke-width="1.6" stroke-opacity=".5"/><circle cx="15" cy="15" r="6.5" stroke="#3bf0a8" stroke-width="1.6" stroke-opacity=".8"/><circle cx="15" cy="15" r="2.4" fill="#3bf0a8"/></svg>
+          <h3>Active recall, not re-reading</h3>
+          <p>Re-reading feels productive — it isn't. RecallRadar forces you to retrieve information, the study method with the strongest evidence behind it. Answers in, gaps out.</p>
+        </div>
+        <div class="hcard">
+          <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M2 15h5l3-8 5 16 3-8h10" stroke="#3fd6ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <h3>A radar for your gaps</h3>
+          <p>Every answer feeds the radar. It maps which concepts you keep missing and how badly — so revision time goes where it matters, not where it feels safe.</p>
+        </div>
+        <div class="hcard">
+          <svg width="30" height="30" viewBox="0 0 30 30" fill="none" aria-hidden="true"><path d="M15 4a11 11 0 1 0 11 11" stroke="#3bf0a8" stroke-width="1.8" stroke-linecap="round"/><path d="M15 1v6M26 15h-6" stroke="#3bf0a8" stroke-width="1.8" stroke-linecap="round"/><circle cx="15" cy="15" r="3" fill="#3bf0a8"/></svg>
+          <h3>Revenge rounds</h3>
+          <p>Finished a quiz? The radar rebuilds a fresh round aimed only at what you got wrong — different questions, same weak spots — until the radar goes clear.</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ QUIZ ============ -->
+    <section class="screen" id="screen-quiz">
+      <div class="qhead">
+        <div class="segments" id="segments"></div>
+        <div class="qhead-right">
+          <span class="streak" id="streak" hidden>STREAK <b id="streakN">0</b></span>
+          <span class="qcount" id="qCount">Q1 / 8</span>
+        </div>
+      </div>
+      <div class="qcard">
+        <div class="qtype" id="qType">DEFINITION CHECK</div>
+        <div class="qtext" id="qText"></div>
+        <div class="opts" id="opts"></div>
+        <div class="explain" id="explain"></div>
+        <div class="nextrow"><button class="btn btn-primary" id="btnNext" hidden>Next</button></div>
+      </div>
+      <div class="quitrow"><button class="linklike" id="btnQuit">Quit to home</button></div>
+    </section>
+
+    <!-- ============ RESULTS ============ -->
+    <section class="screen" id="screen-results">
+      <div class="res-head">
+        <div>
+          <div class="res-label" id="resLabel">ACCURACY</div>
+          <div class="res-score" id="resScore">0%</div>
+          <div class="verdict" id="verdict"></div>
+        </div>
+        <div class="res-radarbox">
+          <div id="radarChart"></div>
+          <div class="capy-wrap" id="capyWrap" title="">
+            <svg id="capy" class="capy" width="72" viewBox="0 0 120 86" aria-hidden="true">
+              <ellipse cx="50" cy="62" rx="33" ry="19" fill="#8a5a38"/>
+              <ellipse cx="50" cy="66" rx="26" ry="13" fill="#9d6b44"/>
+              <circle cx="83" cy="50" r="15" fill="#8a5a38"/>
+              <circle cx="74" cy="38" r="5" fill="#7a4c2e"/>
+              <circle cx="90" cy="37" r="5" fill="#7a4c2e"/>
+              <ellipse cx="93" cy="56" rx="7.5" ry="5.5" fill="#a97c50"/>
+              <circle cx="95.5" cy="54" r="1.3" fill="#3a2214"/>
+              <circle cx="90.5" cy="54" r="1.3" fill="#3a2214"/>
+              <circle cx="87" cy="46" r="1.7" fill="#2a170b"/>
+              <circle cx="79" cy="46" r="1.7" fill="#2a170b"/>
+              <rect x="28" y="77" width="7" height="8" rx="2.5" fill="#7a4c2e"/>
+              <rect x="56" y="77" width="7" height="8" rx="2.5" fill="#7a4c2e"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+      <div class="concepts" id="conceptChips"></div>
+      <div class="res-actions">
+        <button class="btn btn-primary" id="btnRevenge" hidden>
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="#04121c" stroke-width="1.5"/><circle cx="8" cy="8" r="3" stroke="#04121c" stroke-width="1.5"/><circle cx="8" cy="8" r="1" fill="#04121c"/></svg>
+          Revenge round — hunt my weak spots
+        </button>
+        <button class="btn btn-ghost" id="btnRetake">Retake a fresh quiz</button>
+        <button class="btn btn-ghost" id="btnHome">New notes</button>
+      </div>
+      <div class="res-note" id="resNote"></div>
+    </section>
+
+  </main>
+
+  <footer class="foot">
+    <span>RecallRadar · built for <b>Teens Hack Houston 2026</b> — theme: <i>a more efficient way to live</i></span>
+    <button class="linklike" id="btnCredits">Credits &amp; disclosures</button>
+  </footer>
+</div>
+
+<div class="scan" id="scan" hidden>
+  <div class="scan-card">
+    <div class="scan-radar"><div class="sweep"></div><div class="radar-core"></div></div>
+    <div class="scan-msg" id="scanMsg">Parsing note structure</div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<div class="modal" id="credits" hidden>
+  <div class="modal-card">
+    <h3>Credits &amp; disclosures</h3>
+    <p>RecallRadar is a single-file web application. Everything in it — the interface, the question engine, the radar artwork and the capybara — is original, hand-built for this project.</p>
+    <ul>
+      <li>No external libraries, frameworks, fonts or icon packs are used.</li>
+      <li>Zero network requests — the app runs entirely offline in your browser.</li>
+      <li>Notes pasted into the app never leave your device.</li>
+      <li>Built with vanilla HTML, CSS and JavaScript.</li>
+    </ul>
+    <button class="btn btn-ghost" id="btnCreditsClose">Close</button>
+  </div>
+</div>
+
+<script>
+
+/*ENGINE-START*/
+const RREngine = (() => {
+  'use strict';
+
+  /* ---------------- sample notes ---------------- */
+  const SAMPLES = {
+    bio: { label: 'Biology 101 — Photosynthesis', text: `Photosynthesis Overview — Lecture 4
+Photosynthesis is the process by which green plants convert light energy into chemical energy stored as glucose.
+Chlorophyll is the green pigment inside chloroplasts that absorbs light, mostly red and blue wavelengths.
+A chloroplast is the organelle where photosynthesis takes place.
+The light-dependent reactions occur in the thylakoid membranes and produce ATP and NADPH.
+The Calvin cycle is the light-independent stage that fixes carbon dioxide into glucose, and it takes place in the stroma.
+Stomata are tiny pores on the underside of leaves that exchange gases: carbon dioxide enters, oxygen exits.
+Inputs: 6 carbon dioxide + 6 water + light energy. Outputs: 1 glucose + 6 oxygen.
+Only about 3 percent of the light energy hitting a leaf is converted into chemical energy.
+Chlorophyll reflects green light, which is why most leaves look green.
+The Calvin cycle needs 6 turns to build one glucose molecule.` },
+    psych: { label: 'Psych 101 — Memory', text: `Memory — Lecture 7 Notes
+Memory is the process of encoding, storing, and retrieving information.
+Encoding is the first step of memory: transforming sensory input into a form the brain can store.
+Short-term memory holds about 7 items for roughly 20 to 30 seconds without rehearsal.
+The spacing effect means studying across several days beats one long cramming session.
+Long-term memory is the relatively permanent storage system with essentially unlimited capacity.
+Chunking is grouping information into meaningful units so short-term memory can hold more.
+The serial position effect means we recall the first and last items of a list far better than the middle.
+Retrieval practice is actively recalling information instead of rereading it, and it can roughly double long-term retention.
+Forgetting happens fastest within the first 24 hours after learning.
+Sleep consolidates memories by replaying the day's neural patterns during deep sleep.` },
+    econ: { label: 'Econ 203 — Markets', text: `Econ 203 — Chapter 5 Summary
+Demand curve: a graph showing the quantity demanded at every possible price, and it slopes downward.
+The law of demand says when price rises, quantity demanded falls, holding everything else constant.
+Supply curve: a graph showing the quantity supplied at every price, sloping upward because higher prices make production more profitable.
+Equilibrium is the price where quantity demanded equals quantity supplied.
+A price ceiling is a legal maximum on the price of a good, and it causes shortages when set below equilibrium.
+GDP is the total market value of all final goods and services produced in a country in one year.
+Nominal GDP uses current prices, while real GDP uses constant base-year prices.
+Inflation hit 4.2 percent in 2023, up from 2.8 percent the year before.
+Unemployment counts people in the labor force who are actively seeking work.` }
+  };
+
+  /* ---------------- stopwords ---------------- */
+  const STOP = new Set(`the a an and or but if then else is are was were be been being am do does did doing have has had having i me my mine myself we our us you your yours he she his her hers it its they them their theirs this that these those there here what which who whom whose when where why how all any both each few more most other some such no nor not only own same so than too very can may might will would shall should could must just also only ever never always often sometimes usually generally specifically particularly including include includes based given according per via etc eg ie example examples note notes chapter section page pages lecture fig figure table unit part parts thing things way ways kind sort type types new old first second third last next previous main major key important common different similar various several many much lot lots case cases study studies use used uses using make makes made get gets got take takes taken find finds found show shows shown based work works working help helps need needs cause causes due like unlike about against between through during before after above below up down out off over under again further once because while until unless although though yet still even across among within without along since toward towards onto upon get got go goes going gone come comes came see sees seen look looks looking give gives given take takes put puts keep keeps kept let lets begin begins began start starts started stop stops stopped hear hears heard read reads reading learn learns learned learning know knows known think thinks thought feel feels felt inputs outputs pros cons summary summaries overview recap week intro introduction conclusion review vocab vocabulary terms agenda objectives goals aim aims`.split(/\s+/));
+  const AR_STOP = new Set('في من على إلى عن أن إن هو هي ما لا هذا هذه ذلك تلك التي الذي الذين أو و ثم كل بعض بين عند عندما كان كانت يكون تكون بعد قبل مع هناك هنا أيضا حتى إذا لكن لم لن يا كما هناك ذلك إذ ذلك'.split(/\s+/));
+
+  /* ---------------- helpers ---------------- */
+  const esc = s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  function shuffle(arr) {
+    const a = arr.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+  const stripBullet = s => s.replace(/^\s*(?:[-–—*•·]|\d{1,2}[.)]|[a-z][.)])\s*/i, '');
+
+  // header-ish line: no terminal punctuation, short, or lecture/chapter-style heading
+  function isHeaderish(s) {
+    const t = s.trim();
+    if (/[.!?؟]$/.test(t)) return false;
+    if (t.split(/\s+/).length <= 10) return true;
+    if (/^(lecture|chapter|week|unit|module|topic|review|exam|notes|summary)\b/i.test(t)) return true;
+    return false;
+  }
+
+  function toSentences(text) {
+    const clean = String(text || '').replace(/<[^>]+>/g, ' ').replace(/[ \t]+/g, ' ');
+    const out = [];
+    clean.split(/\r?\n/).forEach(line => {
+      const l = stripBullet(line.trim());
+      if (!l) return;
+      const parts = l.split(/(?<=[.!?؟])\s+/);
+      (parts.length ? parts : [l]).forEach(p => {
+        p = p.trim();
+        if (p.split(/\s+/).length >= 3) out.push(p);
+      });
+    });
+    return out;
+  }
+
+  const DEF_PATTERNS = [
+    /^(.{3,80}?)\s+(?:means that|refers to|is defined as|are defined as|is known as|is called|stands for|happens when|occurs when|is the|are the|is a|are a|is an|means|says|describes|happens|occurs)\s+(.{8,240})$/i,
+    /^(.{3,80}?)\s*[:：]\s*(.{8,240})$/,
+    /^(.{3,80}?)\s+(?:تعني|يعني|هو|هي|يُعرَّف بأنه|يُعرف بأنه)\s+(.{8,240})$/
+  ];
+
+  function cleanSubject(s) {
+    let t = s.trim()
+      .replace(/^\s*(?:the|a|an)\s+/i, '')
+      .replace(/^["“”'’]+|["“”'’]+$/g, '')
+      .replace(/[.!?؟,;:]+$/, '')
+      .trim();
+    if (!t || t.length < 3 || t.length > 70) return null;
+    if (/\d/.test(t)) return null;
+    const words = t.split(/\s+/);
+    if (words.length > 8) return null;
+    let stopCount = words.filter(w => STOP.has(w.toLowerCase().replace(/[^\w'-]/g, '')) || AR_STOP.has(w)).length;
+    if (words.length === 1 && stopCount === 1) return null;
+    if (stopCount / words.length > 0.5) return null;
+    if (/^(this|that|these|those|it|there|they|we|you|he|she|i|here|and|but|so)$/i.test(words[0])) return null;
+    if (/^(و|ثم|هذا|هذه|التي|الذي|إن|أن)/.test(words[0])) return null;
+    return t;
+  }
+
+  function trimDef(s, max) {
+    max = max || 110;
+    s = String(s).trim().replace(/\s+/g, ' ');
+    if (s.length <= max) return s.replace(/[.;]+$/, '');
+    const cut = s.slice(0, max);
+    const sp = cut.lastIndexOf(' ');
+    return ((sp > 60 ? cut.slice(0, sp) : cut).replace(/[,;:]+$/, '')) + '…';
+  }
+
+  const capFirst = t => (t && t.length) ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+
+  /* ---------------- concept database ---------------- */
+  function buildDB(text) {
+    const sents = toSentences(text);
+    const defs = [];
+    sents.forEach(s => {
+      for (const re of DEF_PATTERNS) {
+        const m = s.match(re);
+        if (m) {
+          const t = cleanSubject(m[1]);
+          const d = m[2].trim();
+          if (t && d.split(/\s+/).length >= 4) {
+            defs.push({ term: t, def: d.replace(/[.;]+$/, '') });
+            break;
+          }
+        }
+      }
+    });
+    const defMap = new Map();
+    defs.forEach(d => {
+      const k = d.term.toLowerCase();
+      const cur = defMap.get(k);
+      if (!cur || d.def.length > cur.def.length) defMap.set(k, { term: capFirst(d.term), def: d.def });
+    });
+    const defList = Array.from(defMap.values());
+
+    const scores = new Map();
+    const forms = new Map();
+    const bump = (t, w) => {
+      const k = t.toLowerCase();
+      scores.set(k, (scores.get(k) || 0) + w);
+      if (!forms.has(k)) forms.set(k, t);
+    };
+    defList.forEach(d => bump(d.term, 4));
+    const capRe = /\b([A-Z][\w-]{2,}(?:\s+(?:of|for|the|and|in|to)?\s*[A-Z][\w-]{2,}){0,3})\b/g;
+    let m;
+    while ((m = capRe.exec(text))) {
+      const ph = m[1].trim().replace(/^(?:the|a|an)\s+/i, '');
+      if (ph && ph.split(/\s+/).length <= 6) bump(ph, 1);
+    }
+    const acrRe = /\b[A-Z]{2,7}s?\b/g;
+    while ((m = acrRe.exec(text))) bump(m[0], 2);
+
+    let cands = Array.from(scores.entries())
+      .filter(([k, v]) => v >= 2)
+      .map(([k, v]) => ({ key: k, score: v }))
+      .filter(c => {
+        const words = c.key.split(/\s+/);
+        if (words.length > 6) return false;
+        const nonStop = words.filter(w => !STOP.has(w) && !AR_STOP.has(w));
+        return nonStop.length >= 1 && nonStop.join(' ').length >= 3;
+      });
+    cands.sort((a, b) => b.score - a.score);
+    const kept = [];
+    cands.forEach(c => {
+      const longer = kept.find(k => k.key.includes(c.key) && k.key !== c.key);
+      if (longer && longer.score >= c.score) return;
+      const shorter = kept.find(k => c.key.includes(k.key) && k.key !== c.key);
+      if (shorter && c.score > shorter.score) {
+        kept.splice(kept.indexOf(shorter), 1);
+        kept.push(c);
+        return;
+      }
+      if (!kept.some(k => k.key === c.key)) kept.push(c);
+    });
+    const terms = kept.slice(0, 10).map(c => capFirst(forms.get(c.key) || c.key));
+
+    const sentByTerm = new Map();
+    terms.forEach(t => {
+      const re = new RegExp('(^|[^A-Za-z\\u0600-\\u06FF])' + esc(t) + '($|[^A-Za-z\\u0600-\\u06FF])', 'i');
+      sentByTerm.set(t, sents.filter(s => re.test(s)));
+    });
+    // drop non-definition terms that appear in only one sentence (headers, stray caps)
+    const isDefTerm = new Set(defList.map(d => d.term.toLowerCase()));
+    const finalTerms = terms.filter(t =>
+      isDefTerm.has(t.toLowerCase()) || (sentByTerm.get(t) || []).length >= 2
+    );
+
+    const termRes = finalTerms.map(t => ({
+      term: t,
+      re: new RegExp('(^|[^A-Za-z\\u0600-\\u06FF])' + esc(t) + '($|[^A-Za-z\\u0600-\\u06FF])', 'i'),
+      reAll: new RegExp('(^|[^A-Za-z\\u0600-\\u06FF])' + esc(t) + '($|[^A-Za-z\\u0600-\\u06FF])', 'gi')
+    }));
+
+    const termIn = s => termRes.some(r => r.re.test(s));
+    const firstTermIn = s => {
+      const hit = termRes.find(r => r.re.test(s));
+      return hit ? hit.term : null;
+    };
+
+    const sentByTerm2 = sentByTerm;
+    const numSents = sents.filter(s =>
+      /\d/.test(s) && termIn(s) && s.split(/\s+/).length >= 6 && !isHeaderish(s)
+    );
+
+    return { sents, defList, terms: finalTerms, sentByTerm: sentByTerm2, numSents, termIn, firstTermIn };
+  }
+
+  /* ---------------- option picking ---------------- */
+  function optSet(correct, pool, n) {
+    const seen = new Set([String(correct).toLowerCase()]);
+    const picks = [];
+    for (const p of shuffle(pool)) {
+      const k = String(p).toLowerCase().trim();
+      if (!k || seen.has(k)) continue;
+      seen.add(k);
+      picks.push(String(p));
+      if (picks.length >= n - 1) break;
+    }
+    return picks;
+  }
+
+  function mk(o) {
+    const options = shuffle([o.correct, ...o.distractors]);
+    return {
+      type: o.type, label: o.label, concept: o.concept,
+      text: o.text, options,
+      a: options.indexOf(o.correct),
+      explain: o.explain, src: o.src || null
+    };
+  }
+
+  /* ---------------- question builders ---------------- */
+  function qDef(db, d) {
+    const correct = trimDef(d.def);
+    const others = db.defList.filter(x => x.term.toLowerCase() !== d.term.toLowerCase());
+    const distr = optSet(correct, others.map(x => trimDef(x.def)), 4);
+    if (distr.length < 3) return null;
+    return mk({
+      type: 'def', label: 'DEFINITION CHECK', concept: d.term,
+      text: 'What best describes “' + d.term + '”?',
+      correct, distractors: distr,
+      explain: 'Your notes: “' + d.term + ' — ' + d.def + '”', src: null
+    });
+  }
+
+  function qTerm(db, d) {
+    const snippet = trimDef(d.def, 140);
+    const low = snippet.toLowerCase();
+    const others = db.terms.filter(t => t.toLowerCase() !== d.term.toLowerCase() && !low.includes(t.toLowerCase()));
+    const distr = optSet(d.term, others, 4);
+    if (distr.length < 3) return null;
+    return mk({
+      type: 'term', label: 'TERM MATCH', concept: d.term,
+      text: 'Which term fits: “' + snippet + '”?',
+      correct: d.term, distractors: distr,
+      explain: '“' + d.term + ' — ' + d.def + '”', src: null
+    });
+  }
+
+  function safeClozeSentences(db, t) {
+    const entry = db.sentByTerm.get(t) || [];
+    const covering = db.terms.filter(x => x !== t && x.toLowerCase().includes(t.toLowerCase()));
+    const coverRes = covering.map(x => new RegExp('(^|[^A-Za-z])' + esc(x) + '($|[^A-Za-z])', 'i'));
+    const own = termRe(db, t);
+    return entry.filter(s => {
+      const hits = s.match(own.reAll) || [];
+      if (hits.length !== 1) return false;
+      return !coverRes.some(r => r.test(s));
+    });
+  }
+  const reCache = new Map();
+  function termRe(db, t) {
+    if (!reCache.has(t)) {
+      reCache.set(t, {
+        re: new RegExp('(^|[^A-Za-z])' + esc(t) + '($|[^A-Za-z])', 'i'),
+        reAll: new RegExp('(^|[^A-Za-z])' + esc(t) + '($|[^A-Za-z])', 'gi')
+      });
+    }
+    return reCache.get(t);
+  }
+
+  function qCloze(db, t) {
+    const own = termRe(db, t);
+    const pool = (function () {
+      const base = safeClozeSentences(db, t).filter(s => !isHeaderish(s));
+      return base;
+    })();
+    if (!pool.length) return null;
+    const sent = pool[Math.floor(Math.random() * pool.length)];
+    let blanked = sent.replace(own.re, (mm, pre, post) => pre + '______' + post);
+    blanked = blanked.replace(/______\s*:/, '______');
+    if (!blanked.includes('______')) return null;
+    if (/______\s*\d/.test(blanked)) return null;
+    const visible = blanked.toLowerCase();
+    const poolTerms = db.terms.filter(x =>
+      x.toLowerCase() !== t.toLowerCase() && !visible.includes(x.toLowerCase())
+    );
+    const distr = optSet(t, poolTerms, 4);
+    if (distr.length < 3) return null;
+    return mk({
+      type: 'cloze', label: 'FILL THE BLANK', concept: t,
+      text: blanked,
+      correct: t, distractors: distr,
+      explain: 'Original line: “' + sent + '”', src: sent
+    });
+  }
+
+  function corruptNumber(sent) {
+    const m = sent.match(/\d+(?:\.\d+)?/);
+    if (!m) return null;
+    const v = parseFloat(m[0]);
+    let nv = null;
+    if (Number.isInteger(v) && v >= 1800 && v <= 2099) nv = v + (Math.random() < 0.5 ? 13 : -13);
+    else if (Number.isInteger(v)) nv = Math.random() < 0.5 ? v * 2 : Math.round(v * 0.5);
+    else nv = Math.round(v * 3 * 10) / 10;
+    if (nv === null || nv === v) return null;
+    return sent.replace(m[0], String(nv));
+  }
+
+  function corruptSentence(db, sent) {
+    const numCor = corruptNumber(sent);
+    if (numCor) return numCor;
+    const present = db.terms.filter(t => termRe(db, t).re.test(sent));
+    if (!present.length) return null;
+    const absent = db.terms.filter(t => !present.includes(t));
+    if (!absent.length) return null;
+    const t = present[Math.floor(Math.random() * present.length)];
+    const rep = absent.slice().sort((a, b) => Math.abs(a.length - t.length) - Math.abs(b.length - t.length))[0];
+    return sent.replace(termRe(db, t).re, (mm, pre, post) => pre + rep + post);
+  }
+
+  let tfToggle = false;
+  function qTF(db, sent, concept, forceFalse) {
+    if (!concept) return null;
+    let isFalse = forceFalse === undefined ? (tfToggle = !tfToggle) : forceFalse;
+    let shown = sent;
+    if (isFalse) {
+      const c = corruptSentence(db, sent);
+      if (!c) isFalse = false;
+      else shown = c;
+    }
+    return {
+      type: 'tf', label: 'TRUE OR FALSE', concept,
+      text: '“' + shown + '”',
+      options: ['True', 'False'],
+      a: isFalse ? 1 : 0,
+      explain: isFalse ? 'Your notes actually say: “' + sent + '”' : 'Verbatim from your notes.',
+      src: sent
+    };
+  }
+
+  function numVariants(v, dec) {
+    const seen = new Set([String(v)]);
+    const out = [];
+    const add = n => {
+      if (dec) n = Math.round(n * 10) / 10;
+      else n = Math.round(n);
+      if (n <= 0) return;
+      const k = dec ? n.toFixed(1) : String(n);
+      if (seen.has(k)) return;
+      seen.add(k);
+      out.push(k);
+    };
+    add(v * 2); add(v / 2); add(v * 1.5 + 1);
+    add(v + Math.max(2, Math.round(v * 0.3)));
+    add(v - Math.max(1, Math.round(v * 0.3)));
+    add(v + 5);
+    return out;
+  }
+
+  function qNum(db, sent, concept) {
+    if (!concept) return null;
+    const m = sent.match(/\d+(?:\.\d+)?/);
+    if (!m) return null;
+    const raw = m[0];
+    const v = parseFloat(raw);
+    const dec = raw.includes('.');
+    let vars;
+    if (!dec && v >= 1800 && v <= 2099) vars = [String(v + 13), String(v - 13), String(v + 2)];
+    else vars = numVariants(v, dec);
+    if (vars.length < 3) return null;
+    const blanked = sent.replace(raw, '______');
+    const correct = dec ? v.toFixed(1) : raw;
+    return mk({
+      type: 'num', label: 'NUMBERS FROM YOUR NOTES', concept,
+      text: blanked,
+      correct, distractors: vars.slice(0, 3),
+      explain: 'Your notes state: “' + sent + '”', src: sent
+    });
+  }
+
+  /* ---------------- quiz assembly ---------------- */
+  function generateQuiz(text) {
+    reCache.clear();
+    tfToggle = false;
+    const db = buildDB(text);
+    if (db.terms.length < 2) {
+      return { error: 'Add a bit more — I need at least two clear concepts to aim at. A solid paragraph (80+ words) works best.' };
+    }
+    const qs = [];
+    const srcUsed = new Set();
+    function push(q) {
+      if (!q) return;
+      if (qs.length >= 14) return;
+      if (q.src) {
+        if (srcUsed.has(q.src)) return;
+        srcUsed.add(q.src);
+      }
+      qs.push(q);
+    }
+
+    db.defList.forEach((d, i) => push(i % 2 === 0 ? qDef(db, d) : qTerm(db, d)));
+    if (db.defList.length === 1) {
+      push(qDef(db, db.defList[0]));
+      push(qTerm(db, db.defList[0]));
+    }
+    db.terms.forEach(t => push(qCloze(db, t)));
+
+    let tfCount = 0;
+    const tfPool = shuffle(db.sents.filter(s =>
+      db.termIn(s) && s.split(/\s+/).length >= 6 && !isHeaderish(s)
+    ));
+    for (const s of tfPool) {
+      if (tfCount >= 3) break;
+      const q = qTF(db, s, db.firstTermIn(s));
+      if (q) { push(q); tfCount++; }
+    }
+
+    let numCount = 0;
+    for (const s of db.numSents) {
+      if (numCount >= 2) break;
+      const q = qNum(db, s, db.firstTermIn(s));
+      if (q) { push(q); numCount++; }
+    }
+
+    if (qs.length < 4) {
+      return { error: 'I could not build enough solid questions from this. Richer notes work best — full sentences with definitions and facts.' };
+    }
+    // balanced selection: guarantee variety across question types
+    const by = t => shuffle(qs.filter(q => q.type === t));
+    const picked = [...by('def'), ...by('term')].slice(0, 4)
+      .concat(by('cloze').slice(0, 4))
+      .concat(by('tf').slice(0, 3))
+      .concat(by('num').slice(0, 2));
+    const leftovers = shuffle(qs.filter(q => !picked.includes(q)));
+    let quiz = picked.concat(leftovers);
+    while (quiz.length > 10) quiz.splice(Math.floor(Math.random() * quiz.length), 1);
+    return { questions: shuffle(quiz), db };
+  }
+
+  /* ---------------- revenge round ---------------- */
+  function buildRevenge(db, missedQs) {
+    reCache.clear();
+    const seen = new Map();
+    missedQs.forEach(q => {
+      const s = seen.get(q.concept) || new Set();
+      s.add(q.type);
+      seen.set(q.concept, s);
+    });
+    const all = ['term', 'def', 'cloze', 'tf'];
+    const qs = [];
+    Array.from(seen.keys()).forEach(c => {
+      const avoid = seen.get(c);
+      const d = db.defList.find(x => x.term.toLowerCase() === c.toLowerCase());
+      const t = db.terms.find(x => x.toLowerCase() === c.toLowerCase());
+      const order = shuffle(all.filter(x => !avoid.has(x)));
+      for (const ty of order) {
+        let q = null;
+        if (ty === 'def' && d) q = qDef(db, d);
+        else if (ty === 'term' && d) q = qTerm(db, d);
+        else if (ty === 'cloze' && t) q = qCloze(db, t);
+        else if (ty === 'tf' && t) {
+          const pool = (db.sentByTerm.get(t) || []).filter(s => s.split(/\s+/).length >= 6);
+          if (pool.length) q = qTF(db, pool[Math.floor(Math.random() * pool.length)], t, true);
+        }
+        if (q) { qs.push(q); break; }
+      }
+    });
+    if (qs.length < 3) {
+      Array.from(seen.keys()).forEach(c => {
+        if (qs.length >= 4) return;
+        const t = db.terms.find(x => x.toLowerCase() === c.toLowerCase());
+        if (!t) return;
+        const q = qCloze(db, t);
+        if (q && !qs.some(x => x.text === q.text)) qs.push(q);
+      });
+    }
+    if (!qs.length) return { questions: [] };
+    return { questions: shuffle(qs).slice(0, 6) };
+  }
+
+  return { generateQuiz, buildRevenge, SAMPLES };
+})();
+/*ENGINE-END*/
+/*APP-START*/
+(() => {
+  'use strict';
+  const $ = s => document.querySelector(s);
+  const E = RREngine;
+  const REDUCED = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const els = {
+    input: $('#notes'), wordCount: $('#wordCount'), btnScan: $('#btnScan'),
+    scan: $('#scan'), scanMsg: $('#scanMsg'),
+    screenHome: $('#screen-home'), screenQuiz: $('#screen-quiz'), screenResults: $('#screen-results'),
+    segments: $('#segments'), qCount: $('#qCount'), streak: $('#streak'), streakN: $('#streakN'),
+    qType: $('#qType'), qText: $('#qText'), opts: $('#opts'), explain: $('#explain'), btnNext: $('#btnNext'),
+    btnQuit: $('#btnQuit'),
+    resLabel: $('#resLabel'), resScore: $('#resScore'), verdict: $('#verdict'),
+    radarChart: $('#radarChart'), conceptChips: $('#conceptChips'),
+    btnRevenge: $('#btnRevenge'), btnRetake: $('#btnRetake'), btnHome: $('#btnHome'), resNote: $('#resNote'),
+    capy: $('#capy'), statChips: $('#statChips'),
+    toast: $('#toast'), credits: $('#credits'),
+    btnCredits: $('#btnCredits'), btnCreditsClose: $('#btnCreditsClose')
+  };
+
+  const state = {
+    text: '', db: null, quiz: [], answers: [], idx: 0, correct: 0,
+    locked: false, streak: 0, revenge: false, lastCs: null, capyFound: false
+  };
+  let toastTimer = null;
+
+  /* ---------------- utilities ---------------- */
+  function escHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function go(screen) {
+    [els.screenHome, els.screenQuiz, els.screenResults].forEach(s => s.classList.remove('active'));
+    screen.classList.add('active');
+    window.scrollTo(0, 0);
+  }
+  function toast(msg) {
+    els.toast.textContent = msg;
+    els.toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => els.toast.classList.remove('show'), 3000);
+  }
+  function countUp(el, target, suffix) {
+    if (REDUCED) { el.textContent = target + suffix; return; }
+    const t0 = performance.now(), dur = 900;
+    function frame(t) {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(target * eased) + suffix;
+      if (p < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------------- stats ---------------- */
+  function loadStats() {
+    try { return JSON.parse(localStorage.getItem('rr_stats')) || { s: 0, best: 0 }; }
+    catch (e) { return { s: 0, best: 0 }; }
+  }
+  function renderStats() {
+    const st = loadStats();
+    if (!st.s) { els.statChips.innerHTML = ''; return; }
+    els.statChips.innerHTML =
+      '<span class="stat-chip">SESSIONS <b>' + st.s + '</b></span>' +
+      '<span class="stat-chip">BEST <b>' + st.best + '%</b></span>';
+  }
+  function saveStats(score) {
+    const st = loadStats();
+    st.s += 1;
+    if (score > st.best) st.best = score;
+    try { localStorage.setItem('rr_stats', JSON.stringify(st)); } catch (e) {}
+    renderStats();
+  }
+
+  /* ---------------- 3D tilt ---------------- */
+  function bindTilt() {
+    if (REDUCED || window.matchMedia('(pointer: coarse)').matches) return;
+    document.querySelectorAll('.hcard, .step').forEach(card => {
+      card.style.willChange = 'transform';
+      card.style.transition = 'transform .18s ease';
+      card.addEventListener('pointermove', ev => {
+        const r = card.getBoundingClientRect();
+        const px = (ev.clientX - r.left) / r.width - 0.5;
+        const py = (ev.clientY - r.top) / r.height - 0.5;
+        card.style.transform = 'perspective(700px) rotateX(' + (-py * 7).toFixed(2) + 'deg) rotateY(' + (px * 9).toFixed(2) + 'deg) translateY(-2px)';
+      });
+      card.addEventListener('pointerleave', () => { card.style.transform = ''; });
+    });
+  }
+
+  /* ---------------- scan overlay ---------------- */
+  const SCAN_MSGS = ['Parsing note structure', 'Extracting key concepts', 'Calibrating question mix'];
+  function showScan(done) {
+    els.scan.hidden = false;
+    let i = 0;
+    els.scanMsg.textContent = SCAN_MSGS[0];
+    const tick = setInterval(() => {
+      i++;
+      if (i < SCAN_MSGS.length) els.scanMsg.textContent = SCAN_MSGS[i];
+      else {
+        clearInterval(tick);
+        setTimeout(() => { done(); els.scan.hidden = true; }, 260);
+      }
+    }, 430);
+  }
+
+  /* ---------------- generate ---------------- */
+  function generate() {
+    if (!els.scan.hidden) return;
+    const text = els.input.value.trim();
+    const words = text.split(/\s+/).filter(Boolean).length;
+    if (words < 40) {
+      toast('Paste a bit more — a solid paragraph (80+ words) gives the radar something real to scan.');
+      els.input.focus();
+      return;
+    }
+    els.btnScan.disabled = true;
+    showScan(() => {
+      els.btnScan.disabled = false;
+      const res = E.generateQuiz(text);
+      if (res.error) { toast(res.error); return; }
+      state.text = text;
+      state.db = res.db;
+      state.revenge = false;
+      startQuiz(res.questions);
+    });
+  }
+
+  /* ---------------- quiz ---------------- */
+  function startQuiz(questions, revenge) {
+    state.quiz = questions;
+    state.answers = new Array(questions.length).fill(null);
+    state.idx = 0;
+    state.correct = 0;
+    state.streak = 0;
+    state.locked = false;
+    state.revenge = !!revenge;
+    document.body.classList.toggle('revenge', state.revenge);
+    els.segments.innerHTML = questions.map(() => '<span class="seg"></span>').join('');
+    els.streak.hidden = true;
+    go(els.screenQuiz);
+    renderQ();
+  }
+
+  function renderQ() {
+    const q = state.quiz[state.idx];
+    state.locked = false;
+    els.qType.textContent = state.revenge ? 'REVENGE · ' + q.label : q.label;
+    els.qText.innerHTML = escHtml(q.text).replace(/_{4,}/g, '<span class="blank">______</span>');
+    els.opts.innerHTML = '';
+    q.options.forEach((opt, i) => {
+      const b = document.createElement('button');
+      b.className = 'opt';
+      b.innerHTML = '<span class="key">' + 'ABCD'[i] + '</span><span>' + escHtml(opt) + '</span>';
+      b.addEventListener('click', () => choose(i));
+      els.opts.appendChild(b);
+    });
+    els.explain.className = 'explain';
+    els.explain.innerHTML = '';
+    els.btnNext.hidden = true;
+    els.qCount.textContent = 'Q' + (state.idx + 1) + ' / ' + state.quiz.length;
+  }
+
+  function choose(i) {
+    if (state.locked) return;
+    state.locked = true;
+    const q = state.quiz[state.idx];
+    const ok = i === q.a;
+    state.answers[state.idx] = ok;
+    if (ok) { state.correct++; state.streak++; } else { state.streak = 0; }
+    const segs = els.segments.children;
+    if (segs[state.idx]) segs[state.idx].classList.add(ok ? 'done' : 'fail');
+    const buttons = els.opts.querySelectorAll('.opt');
+    buttons.forEach((b, j) => {
+      b.disabled = true;
+      if (j === q.a) b.classList.add('is-correct');
+      else if (j === i) b.classList.add('is-wrong');
+    });
+    if (state.streak >= 2) {
+      els.streak.hidden = false;
+      els.streakN.textContent = state.streak;
+    } else {
+      els.streak.hidden = true;
+    }
+    els.explain.innerHTML = '<b>' + (ok ? 'Correct.' : 'Missed.') + '</b> ' + escHtml(q.explain || '');
+    els.explain.classList.add('show');
+    els.btnNext.textContent = state.idx === state.quiz.length - 1
+      ? (state.revenge ? 'See the fallout' : 'See my radar')
+      : 'Next';
+    els.btnNext.hidden = false;
+    els.btnNext.focus();
+  }
+
+  function next() {
+    if (!state.locked) return;
+    state.idx++;
+    if (state.idx >= state.quiz.length) finish();
+    else renderQ();
+  }
+
+  function finish() {
+    const cs = {};
+    state.quiz.forEach((q, i) => {
+      const rec = cs[q.concept] || (cs[q.concept] = { ok: 0, total: 0 });
+      rec.total++;
+      if (state.answers[i]) rec.ok++;
+    });
+    state.lastCs = cs;
+    showResults(cs);
+  }
+
+  /* ---------------- results ---------------- */
+  function verdictFor(score, revenge) {
+    if (revenge) {
+      if (score === 100) return 'Radar clear. Your weak spots are gone — for now.';
+      if (score >= 60) return 'Progress. The radar stays hot on whatever is left.';
+      return 'The radar is still tracking. Run it again.';
+    }
+    if (score === 100) return 'Flawless sweep. Nothing escaped the radar.';
+    if (score >= 80) return 'Sharp. Only a few blips left to hunt down.';
+    if (score >= 50) return 'Solid core — but your weak spots are glowing on the radar.';
+    return 'The radar found real gaps. Good — that is exactly the point.';
+  }
+
+  function showResults(cs) {
+    const entries = Object.entries(cs);
+    const total = entries.reduce((s, e) => s + e[1].total, 0);
+    const ok = entries.reduce((s, e) => s + e[1].ok, 0);
+    const score = Math.round(100 * ok / total);
+    const missed = entries.filter(e => e[1].ok < e[1].total);
+
+    els.resLabel.textContent = state.revenge ? 'REVENGE ROUND ACCURACY' : 'ACCURACY';
+    els.resScore.textContent = '0%';
+    countUp(els.resScore, score, '%');
+    els.verdict.textContent = verdictFor(score, state.revenge);
+
+    // concept chips — weak first
+    const sorted = entries.slice().sort((a, b) => (a[1].ok / a[1].total) - (b[1].ok / b[1].total));
+    els.conceptChips.innerHTML = sorted.map(([name, r]) => {
+      const cls = r.ok === r.total ? 'strong' : 'weak';
+      return '<span class="cchip ' + cls + '">' + (r.ok === r.total ? '✓' : '✗') + ' ' + escHtml(name) + ' · ' + r.ok + '/' + r.total + '</span>';
+    }).join('');
+
+    buildRadar(sorted);
+
+    // revenge availability
+    if (!state.revenge && missed.length > 0) {
+      els.btnRevenge.hidden = false;
+      els.btnRevenge.lastChild.textContent = ' Revenge round — hunt my weak spots';
+    } else if (state.revenge && missed.length > 0) {
+      els.btnRevenge.hidden = false;
+      els.btnRevenge.lastChild.textContent = ' Another revenge round';
+    } else {
+      els.btnRevenge.hidden = true;
+    }
+
+    if (state.revenge) {
+      const cleared = sorted.filter(e => e[1].ok === e[1].total).length;
+      els.resNote.textContent = 'You cleared ' + cleared + ' of ' + entries.length +
+        ' weak spots this round.' + (cleared === entries.length ? ' The radar is clear.' : ' The radar keeps tracking what remains.');
+    } else {
+      els.resNote.textContent = entries.length + ' concepts scanned · ' + missed.length +
+        ' weak spot' + (missed.length === 1 ? '' : 's') + ' detected. Revenge rounds rebuild fresh questions from your mistakes only.';
+    }
+
+    if (!state.revenge) saveStats(score);
+    go(els.screenResults);
+  }
+
+  /* ---------------- radar chart ---------------- */
+  function buildRadar(sortedEntries) {
+    const n = Math.min(sortedEntries.length, 7);
+    if (n < 3) { els.radarChart.innerHTML = ''; return; }
+    const S = 400, C = S / 2, R = 92, L = 112, MAXLBL = 14;
+    const data = sortedEntries.slice(0, n);
+    const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
+    let rings = '';
+    [0.33, 0.66, 1].forEach(f => {
+      const pts = data.map((_, i) =>
+        (C + Math.cos(ang(i)) * R * f).toFixed(1) + ',' + (C + Math.sin(ang(i)) * R * f).toFixed(1)).join(' ');
+      rings += '<polygon class="ring" points="' + pts + '"/>';
+    });
+    let axes = '';
+    data.forEach((_, i) => {
+      axes += '<line class="axis" x1="' + C + '" y1="' + C + '" x2="' + (C + Math.cos(ang(i)) * R).toFixed(1) + '" y2="' + (C + Math.sin(ang(i)) * R).toFixed(1) + '"/>';
+    });
+    let labels = '';
+    data.forEach(([name, r], i) => {
+      const acc = r.ok / r.total;
+      const a = ang(i);
+      const lx = C + Math.cos(a) * L, ly = C + Math.sin(a) * L;
+      const anchor = Math.cos(a) > 0.3 ? 'start' : Math.cos(a) < -0.3 ? 'end' : 'middle';
+      const dy = Math.sin(a) < -0.3 ? -7 : Math.sin(a) > 0.3 ? 13 : 4;
+      const short = name.length > MAXLBL ? name.slice(0, MAXLBL - 1).replace(/\s+\S*$/, '') + '…' : name;
+      labels += '<text class="' + (acc === 1 ? 'strong' : 'weak') + '" x="' + lx.toFixed(1) + '" y="' + (ly + dy).toFixed(1) + '" text-anchor="' + anchor + '">' + escHtml(short) + '</text>';
+    });
+    const targets = data.map(([, r], i) => {
+      const acc = r.ok / r.total;
+      const rad = Math.max(10, R * acc);
+      return [C + Math.cos(ang(i)) * rad, C + Math.sin(ang(i)) * rad];
+    });
+    const dots = targets.map((p, i) => {
+      const weak = data[i][1].ok < data[i][1].total ? ' weak' : '';
+      return '<circle class="dot' + weak + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="4"/>';
+    }).join('');
+    els.radarChart.innerHTML =
+      '<svg viewBox="0 0 ' + S + ' ' + S + '" role="img" aria-label="Weakness radar">' +
+      rings + axes + '<polygon class="poly" id="rrPoly" points="' + targets.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' + dots + labels + '</svg>';
+
+    if (REDUCED) return;
+    const poly = $('#rrPoly');
+    const t0 = performance.now(), dur = 750;
+    function frame(t) {
+      const p = Math.min(1, (t - t0) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      const pts = targets.map(pt =>
+        (C + (pt[0] - C) * eased).toFixed(1) + ',' + (C + (pt[1] - C) * eased).toFixed(1)).join(' ');
+      poly.setAttribute('points', pts);
+      if (p < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  /* ---------------- revenge / retake / home ---------------- */
+  function startRevenge() {
+    const missedQs = state.quiz.filter(q => {
+      const r = state.lastCs[q.concept];
+      return r && r.ok < r.total;
+    });
+    const res = E.buildRevenge(state.db, missedQs);
+    if (!res.questions.length) {
+      toast('Nothing left to hunt — the radar is clear. Try richer notes for a new battle.');
+      els.btnRevenge.hidden = true;
+      return;
+    }
+    startQuiz(res.questions, true);
+  }
+  function retake() {
+    const res = E.generateQuiz(state.text);
+    if (res.error) { toast(res.error); go(els.screenHome); return; }
+    state.db = res.db;
+    startQuiz(res.questions, false);
+  }
+
+  /* ---------------- wiring ---------------- */
+  els.btnScan.addEventListener('click', generate);
+  els.input.addEventListener('input', () => {
+    const w = els.input.value.split(/\s+/).filter(Boolean).length;
+    els.wordCount.textContent = w + ' words';
+  });
+  els.input.addEventListener('keydown', ev => {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') generate();
+  });
+  document.querySelectorAll('.chip[data-sample]').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const s = E.SAMPLES[chip.dataset.sample];
+      if (!s) return;
+      els.input.value = s.text;
+      els.input.dispatchEvent(new Event('input'));
+      toast(s.label + ' sample loaded — hit “Scan my notes”.');
+      $('#tool').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
+    });
+  });
+  els.btnNext.addEventListener('click', next);
+  els.btnQuit.addEventListener('click', () => { document.body.classList.remove('revenge'); go(els.screenHome); });
+  els.btnRevenge.addEventListener('click', startRevenge);
+  els.btnRetake.addEventListener('click', retake);
+  els.btnHome.addEventListener('click', () => { document.body.classList.remove('revenge'); go(els.screenHome); });
+  els.capy.addEventListener('click', () => {
+    els.capy.classList.remove('spotted');
+    void els.capy.offsetWidth;
+    els.capy.classList.add('spotted');
+    if (!state.capyFound) {
+      state.capyFound = true;
+      toast('You spotted Radar the capybara. Secret unlocked.');
+    }
+  });
+  els.btnCredits.addEventListener('click', () => { els.credits.hidden = false; });
+  els.btnCreditsClose.addEventListener('click', () => { els.credits.hidden = true; });
+  els.credits.addEventListener('click', ev => { if (ev.target === els.credits) els.credits.hidden = true; });
+
+  document.addEventListener('keydown', ev => {
+    if (ev.target === els.input) return;
+    if (!els.credits.hidden || !els.scan.hidden) return;
+    if (!els.screenQuiz.classList.contains('active')) return;
+    if (!state.locked && /^[1-4]$/.test(ev.key)) {
+      const i = parseInt(ev.key, 10) - 1;
+      if (i < state.quiz[state.idx].options.length) choose(i);
+    } else if (state.locked && (ev.key === 'Enter' || ev.key === ' ')) {
+      ev.preventDefault();
+      next();
+    }
+  });
+
+  renderStats();
+  bindTilt();
+})();
+/*APP-END*/
+</script>
+</body>
+</html>
