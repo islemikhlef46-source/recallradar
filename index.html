@@ -8,7 +8,8 @@
 <meta name="theme-color" content="#05070d">
 <!--
   RecallRadar — built for Teens Hack Houston Hackathon 2026 (theme: "a more efficient way to live")
-  Single-file web app: zero external dependencies, zero network requests, runs fully offline.
+  Single-file web app. Text notes run fully offline with zero dependencies; optional photo
+  scanning lazy-loads the open-source Tesseract.js OCR engine from a CDN on first use.
   Interface, question engine, radar artwork and the capybara are original hand-built work.
 -->
 <style>
@@ -164,6 +165,13 @@
   }
   .chip:hover{border-color:rgba(63,214,255,.5);color:var(--text);transform:translateY(-1px)}
   .counter{font-family:var(--mono);font-size:.72rem;color:var(--faint);margin-left:auto}
+  .langpick{
+    appearance:none;-webkit-appearance:none;cursor:pointer;padding-right:24px;color:var(--muted);
+    background-image:linear-gradient(45deg,transparent 50%,var(--faint) 50%),linear-gradient(135deg,var(--faint) 50%,transparent 50%);
+    background-position:calc(100% - 13px) 55%,calc(100% - 8px) 55%;background-size:5px 5px;background-repeat:no-repeat;
+  }
+  .langpick option{background:#0d1526;color:var(--text)}
+  textarea.drag{border-color:rgba(63,214,255,.6);box-shadow:0 0 0 3px rgba(63,214,255,.14)}
 
   /* buttons */
   .btn{
@@ -278,14 +286,17 @@
   .capy:hover{transform:scale(1.08)}
   .capy.spotted{animation:capyBounce .8s cubic-bezier(.2,1.8,.4,1)}
   @keyframes capyBounce{0%{transform:scale(1)}30%{transform:scale(1.3) rotate(-6deg)}55%{transform:scale(.92) rotate(4deg)}100%{transform:scale(1)}}
-  .concepts{display:flex;gap:9px;flex-wrap:wrap;margin-top:clamp(18px,3vw,26px)}
-  .cchip{
-    display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:.74rem;
-    border:1px solid var(--line);border-radius:999px;padding:8px 14px;color:var(--muted);
-    background:rgba(10,16,32,.5);
-  }
-  .cchip.weak{border-color:rgba(255,180,84,.5);color:var(--amber);background:rgba(255,180,84,.07)}
-  .cchip.strong{border-color:rgba(59,240,168,.45);color:var(--green);background:rgba(59,240,168,.06)}
+  .concepts{display:flex;flex-direction:column;gap:10px;margin-top:clamp(18px,3vw,26px);max-width:520px}
+  .btitle{font-family:var(--mono);font-size:.72rem;letter-spacing:.14em;color:var(--faint);text-transform:uppercase}
+  .brow{display:flex;align-items:center;gap:10px;font-size:.92rem}
+  .brow .bname{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .brow.weak .bname{color:var(--amber)}
+  .brow.strong .bname{color:var(--muted)}
+  .bbar{flex:0 0 110px;height:6px;border-radius:3px;background:rgba(122,150,208,.15);overflow:hidden}
+  .bbar i{display:block;height:100%;border-radius:3px}
+  .brow.weak .bbar i{background:var(--amber)}
+  .brow.strong .bbar i{background:var(--green)}
+  .bnum{font-family:var(--mono);font-size:.78rem;color:var(--faint);min-width:36px;text-align:right}
   .res-actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:clamp(22px,3.4vw,32px)}
   .res-note{color:var(--faint);font-size:.85rem;margin-top:16px;line-height:1.7}
 
@@ -405,7 +416,7 @@
       <div class="tool" id="tool">
         <div class="tool-head">
           <h2>Feed the radar</h2>
-          <span class="tool-note">WORKS OFFLINE · NOTHING LEAVES YOUR DEVICE</span>
+          <span class="tool-note">TEXT NOTES WORK OFFLINE · NOTHING LEAVES YOUR DEVICE</span>
         </div>
         <textarea id="notes" spellcheck="false" placeholder="Paste your lecture notes, a chapter summary, or a revision sheet — bullet points, paragraphs, messy text, anything.&#10;&#10;Example:  Photosynthesis is the process by which plants convert light energy into glucose. The Calvin cycle takes place in the stroma and needs 6 turns to build one glucose molecule…"></textarea>
         <div class="tool-actions">
@@ -418,6 +429,16 @@
             <button class="chip" data-sample="bio">Biology 101</button>
             <button class="chip" data-sample="psych">Psych 101</button>
             <button class="chip" data-sample="econ">Econ 203</button>
+            <button class="chip" id="btnPhoto" type="button" title="Add a photo of your notes — typed text works best. You can also paste a screenshot with Ctrl+V, or drag an image onto the box.">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M4 8h3l2-2.5h6L17 8h3a1 1 0 0 1 1 1v9a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V9a1 1 0 0 1 1-1Z" stroke="currentColor" stroke-width="1.7"/><circle cx="12" cy="13" r="3.2" stroke="currentColor" stroke-width="1.7"/></svg>
+              Add photo
+            </button>
+            <select class="chip langpick" id="ocrLang" aria-label="Photo language" title="Language of the text inside your photos">
+              <option value="eng">EN photo</option>
+              <option value="ara">AR photo</option>
+              <option value="ara+eng">AR+EN</option>
+            </select>
+            <input type="file" id="photoInput" accept="image/*" multiple hidden>
           </div>
           <span class="counter" id="wordCount">0 words</span>
         </div>
@@ -468,6 +489,7 @@
           <div class="res-label" id="resLabel">ACCURACY</div>
           <div class="res-score" id="resScore">0%</div>
           <div class="verdict" id="verdict"></div>
+          <div class="concepts" id="conceptChips"></div>
         </div>
         <div class="res-radarbox">
           <div id="radarChart"></div>
@@ -489,7 +511,6 @@
           </div>
         </div>
       </div>
-      <div class="concepts" id="conceptChips"></div>
       <div class="res-actions">
         <button class="btn btn-primary" id="btnRevenge" hidden>
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none" aria-hidden="true"><circle cx="8" cy="8" r="6.5" stroke="#04121c" stroke-width="1.5"/><circle cx="8" cy="8" r="3" stroke="#04121c" stroke-width="1.5"/><circle cx="8" cy="8" r="1" fill="#04121c"/></svg>
@@ -523,10 +544,9 @@
     <h3>Credits &amp; disclosures</h3>
     <p>RecallRadar is a single-file web application. Everything in it — the interface, the question engine, the radar artwork and the capybara — is original, hand-built for this project.</p>
     <ul>
-      <li>No external libraries, frameworks, fonts or icon packs are used.</li>
-      <li>Zero network requests — the app runs entirely offline in your browser.</li>
-      <li>Notes pasted into the app never leave your device.</li>
-      <li>Built with vanilla HTML, CSS and JavaScript.</li>
+      <li>Built with vanilla HTML, CSS and JavaScript — no frameworks or icon packs.</li>
+      <li>Text notes work fully offline; they never leave your device.</li>
+      <li>Optional photo scanning loads the open-source Tesseract.js OCR engine from the web when you use it — photos are read inside your browser and are never uploaded anywhere.</li>
     </ul>
     <button class="btn btn-ghost" id="btnCreditsClose">Close</button>
   </div>
@@ -575,7 +595,7 @@ Unemployment counts people in the labor force who are actively seeking work.` }
   };
 
   /* ---------------- stopwords ---------------- */
-  const STOP = new Set(`the a an and or but if then else is are was were be been being am do does did doing have has had having i me my mine myself we our us you your yours he she his her hers it its they them their theirs this that these those there here what which who whom whose when where why how all any both each few more most other some such no nor not only own same so than too very can may might will would shall should could must just also only ever never always often sometimes usually generally specifically particularly including include includes based given according per via etc eg ie example examples note notes chapter section page pages lecture fig figure table unit part parts thing things way ways kind sort type types new old first second third last next previous main major key important common different similar various several many much lot lots case cases study studies use used uses using make makes made get gets got take takes taken find finds found show shows shown based work works working help helps need needs cause causes due like unlike about against between through during before after above below up down out off over under again further once because while until unless although though yet still even across among within without along since toward towards onto upon get got go goes going gone come comes came see sees seen look looks looking give gives given take takes put puts keep keeps kept let lets begin begins began start starts started stop stops stopped hear hears heard read reads reading learn learns learned learning know knows known think thinks thought feel feels felt inputs outputs pros cons summary summaries overview recap week intro introduction conclusion review vocab vocabulary terms agenda objectives goals aim aims`.split(/\s+/));
+  const STOP = new Set(`the a an and or but if then else is are was were be been being am do does did doing have has had having i me my mine myself we our us you your yours he she his her hers it its they them their theirs this that these those there here what which who whom whose when where why how all any both each few more most other some such no nor not only own same so than too very can may might will would shall should could must just also only ever never always often sometimes usually generally specifically particularly including include includes based given according per via etc eg ie example examples note notes chapter section page pages lecture fig figure table unit part parts thing things way ways kind sort type types new old first second third last next previous main major key important common different similar various several many much lot lots case cases study studies use used uses using make makes made get gets got take takes taken find finds found show shows shown based work works working help helps need needs cause causes due like unlike about against between through during before after above below up down out off over under again further once because while until unless although though yet still even across among within without along since toward towards onto upon get got go goes going gone come comes came see sees seen look looks looking give gives given take takes put puts keep keeps kept let lets begin begins began start starts started stop stops stopped hear hears heard read reads reading learn learns learned learning know knows known think thinks thought feel feels felt inputs outputs pros cons summary summaries overview recap week intro introduction conclusion review vocab vocabulary terms agenda objectives goals aim aims for with from to of in on at by as into mean means meant say says said`.split(/\s+/));
   const AR_STOP = new Set('في من على إلى عن أن إن هو هي ما لا هذا هذه ذلك تلك التي الذي الذين أو و ثم كل بعض بين عند عندما كان كانت يكون تكون بعد قبل مع هناك هنا أيضا حتى إذا لكن لم لن يا كما هناك ذلك إذ ذلك'.split(/\s+/));
 
   /* ---------------- helpers ---------------- */
@@ -684,34 +704,54 @@ Unemployment counts people in the labor force who are actively seeking work.` }
     defList.forEach(d => bump(d.term, 4));
     const capRe = /\b([A-Z][\w-]{2,}(?:\s+(?:of|for|the|and|in|to)?\s*[A-Z][\w-]{2,}){0,3})\b/g;
     let m;
-    while ((m = capRe.exec(text))) {
-      const ph = m[1].trim().replace(/^(?:the|a|an)\s+/i, '');
-      if (ph && ph.split(/\s+/).length <= 6) bump(ph, 1);
-    }
+    sents.forEach(s => {
+      capRe.lastIndex = 0;
+      while ((m = capRe.exec(s))) {
+        const ph = m[1].trim().replace(/^(?:the|a|an)\s+/i, '');
+        if (!ph || ph.split(/\s+/).length > 6) continue;
+        // a lone capitalized word opening a sentence is weak evidence, not a concept
+        const atStart = m.index === 0;
+        bump(ph, (atStart && ph.split(/\s+/).length === 1) ? 0.5 : 1);
+      }
+    });
     const acrRe = /\b[A-Z]{2,7}s?\b/g;
     while ((m = acrRe.exec(text))) bump(m[0], 2);
 
+    const isDefTerm = new Set(defList.map(d => d.term.toLowerCase()));
     let cands = Array.from(scores.entries())
-      .filter(([k, v]) => v >= 2)
       .map(([k, v]) => ({ key: k, score: v }))
       .filter(c => {
         const words = c.key.split(/\s+/);
         if (words.length > 6) return false;
         const nonStop = words.filter(w => !STOP.has(w) && !AR_STOP.has(w));
-        return nonStop.length >= 1 && nonStop.join(' ').length >= 3;
+        if (!nonStop.length || nonStop.join(' ').length < 3) return false;
+        // single words must recur 3+ times or come from a definition; phrases need 2+
+        return c.score >= (words.length === 1 ? 3 : 2) || isDefTerm.has(c.key);
       });
     cands.sort((a, b) => b.score - a.score);
+    // stem-aware merge: kill near-duplicates like "creative thinking" vs "creativity"
+    const stemWord = w => w.toLowerCase().replace(/[^a-z\u0600-\u06ff]/g, '')
+      .replace(/(ities|ity|tions?|ions?|ings?|ness|ments?|ers?|ives?|ed|es|s|al)$/, '');
+    function sameConcept(a, b) {
+      if (a === b || a.includes(b) || b.includes(a)) return true;
+      const wa = a.split(/\s+/), wb = b.split(/\s+/);
+      if (wa.length === wb.length) {
+        return wa.length === 1 && stemWord(wa[0]).length >= 5 && stemWord(wa[0]) === stemWord(wb[0]);
+      }
+      // single vs multi: equal head stems → same family ("creativity" vs "creative thinking")
+      const single = wa.length === 1 ? wa[0] : wb[0];
+      const multiHead = wa.length === 1 ? wb[0] : wa[0];
+      return stemWord(single).length >= 5 && stemWord(single) === stemWord(multiHead);
+    }
     const kept = [];
     cands.forEach(c => {
-      const longer = kept.find(k => k.key.includes(c.key) && k.key !== c.key);
-      if (longer && longer.score >= c.score) return;
-      const shorter = kept.find(k => c.key.includes(k.key) && k.key !== c.key);
-      if (shorter && c.score > shorter.score) {
-        kept.splice(kept.indexOf(shorter), 1);
+      const hit = kept.find(k => sameConcept(k.key, c.key));
+      if (!hit) { kept.push(c); return; }
+      const hitDef = isDefTerm.has(hit.key), cDef = isDefTerm.has(c.key);
+      if ((cDef && !hitDef) || (cDef === hitDef && c.score > hit.score)) {
+        kept.splice(kept.indexOf(hit), 1);
         kept.push(c);
-        return;
       }
-      if (!kept.some(k => k.key === c.key)) kept.push(c);
     });
     const terms = kept.slice(0, 10).map(c => capFirst(forms.get(c.key) || c.key));
 
@@ -721,7 +761,6 @@ Unemployment counts people in the labor force who are actively seeking work.` }
       sentByTerm.set(t, sents.filter(s => re.test(s)));
     });
     // drop non-definition terms that appear in only one sentence (headers, stray caps)
-    const isDefTerm = new Set(defList.map(d => d.term.toLowerCase()));
     const finalTerms = terms.filter(t =>
       isDefTerm.has(t.toLowerCase()) || (sentByTerm.get(t) || []).length >= 2
     );
@@ -940,13 +979,17 @@ Unemployment counts people in the labor force who are actively seeking work.` }
     }
     const qs = [];
     const srcUsed = new Set();
+    const conceptCounts = new Map();
     function push(q) {
       if (!q) return;
       if (qs.length >= 14) return;
+      const k = String(q.concept || '').toLowerCase();
+      if (k && (conceptCounts.get(k) || 0) >= 3) return;
       if (q.src) {
         if (srcUsed.has(q.src)) return;
         srcUsed.add(q.src);
       }
+      if (k) conceptCounts.set(k, (conceptCounts.get(k) || 0) + 1);
       qs.push(q);
     }
 
@@ -985,7 +1028,18 @@ Unemployment counts people in the labor force who are actively seeking work.` }
       .concat(by('num').slice(0, 2));
     const leftovers = shuffle(qs.filter(q => !picked.includes(q)));
     let quiz = picked.concat(leftovers);
-    while (quiz.length > 10) quiz.splice(Math.floor(Math.random() * quiz.length), 1);
+    while (quiz.length > 10) {
+      // trim from the concept carrying the most questions, keeping the mix balanced
+      const counts = new Map();
+      quiz.forEach(q => {
+        const k = String(q.concept || '').toLowerCase();
+        counts.set(k, (counts.get(k) || 0) + 1);
+      });
+      let maxK = null, maxC = 0;
+      counts.forEach((c, k) => { if (c > maxC) { maxC = c; maxK = k; } });
+      const pool = quiz.filter(q => String(q.concept || '').toLowerCase() === maxK);
+      quiz.splice(quiz.indexOf(pool[Math.floor(Math.random() * pool.length)]), 1);
+    }
     return { questions: shuffle(quiz), db };
   }
 
@@ -1051,6 +1105,7 @@ Unemployment counts people in the labor force who are actively seeking work.` }
     radarChart: $('#radarChart'), conceptChips: $('#conceptChips'),
     btnRevenge: $('#btnRevenge'), btnRetake: $('#btnRetake'), btnHome: $('#btnHome'), resNote: $('#resNote'),
     capy: $('#capy'), statChips: $('#statChips'),
+    btnPhoto: $('#btnPhoto'), photoInput: $('#photoInput'), ocrLang: $('#ocrLang'),
     toast: $('#toast'), credits: $('#credits'),
     btnCredits: $('#btnCredits'), btnCreditsClose: $('#btnCreditsClose')
   };
@@ -1270,12 +1325,15 @@ Unemployment counts people in the labor force who are actively seeking work.` }
     countUp(els.resScore, score, '%');
     els.verdict.textContent = verdictFor(score, state.revenge);
 
-    // concept chips — weak first
+    // concept breakdown — weak first, vertical bars
     const sorted = entries.slice().sort((a, b) => (a[1].ok / a[1].total) - (b[1].ok / b[1].total));
-    els.conceptChips.innerHTML = sorted.map(([name, r]) => {
-      const cls = r.ok === r.total ? 'strong' : 'weak';
-      return '<span class="cchip ' + cls + '">' + (r.ok === r.total ? '✓' : '✗') + ' ' + escHtml(name) + ' · ' + r.ok + '/' + r.total + '</span>';
-    }).join('');
+    els.conceptChips.innerHTML =
+      '<div class="btitle">' + (state.revenge ? 'This round, per concept' : 'Revise these first') + '</div>' +
+      sorted.map(([name, r]) => {
+        const cls = r.ok === r.total ? 'strong' : 'weak';
+        const pct = Math.round(100 * r.ok / r.total);
+        return '<div class="brow ' + cls + '"><span class="bname">' + (r.ok === r.total ? '✓ ' : '✗ ') + escHtml(name) + '</span><span class="bbar"><i style="width:' + pct + '%"></i></span><span class="bnum">' + r.ok + '/' + r.total + '</span></div>';
+      }).join('');
 
     buildRadar(sorted);
 
@@ -1307,7 +1365,7 @@ Unemployment counts people in the labor force who are actively seeking work.` }
   function buildRadar(sortedEntries) {
     const n = Math.min(sortedEntries.length, 7);
     if (n < 3) { els.radarChart.innerHTML = ''; return; }
-    const S = 400, C = S / 2, R = 92, L = 112, MAXLBL = 14;
+    const S = 400, C = S / 2, R = 92, L = 112, MAXLBL = 22;
     const data = sortedEntries.slice(0, n);
     const ang = i => -Math.PI / 2 + i * 2 * Math.PI / n;
     let rings = '';
@@ -1340,7 +1398,7 @@ Unemployment counts people in the labor force who are actively seeking work.` }
       return '<circle class="dot' + weak + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="4"/>';
     }).join('');
     els.radarChart.innerHTML =
-      '<svg viewBox="0 0 ' + S + ' ' + S + '" role="img" aria-label="Weakness radar">' +
+      '<svg viewBox="-78 0 556 ' + S + '" role="img" aria-label="Weakness radar">' +
       rings + axes + '<polygon class="poly" id="rrPoly" points="' + targets.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join(' ') + '"/>' + dots + labels + '</svg>';
 
     if (REDUCED) return;
@@ -1378,6 +1436,68 @@ Unemployment counts people in the labor force who are actively seeking work.` }
     startQuiz(res.questions, false);
   }
 
+  /* ---------------- photo OCR (optional, online on first use) ---------------- */
+  const OCR = {
+    _p: null,
+    ensure() {
+      if (!this._p) {
+        this._p = new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+          s.onload = () => resolve(window.Tesseract);
+          s.onerror = () => reject(new Error('cdn'));
+          document.head.appendChild(s);
+        }).then(T => T);
+      }
+      return this._p;
+    }
+  };
+  function readAsDataURL(file) {
+    return new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result);
+      r.onerror = reject;
+      r.readAsDataURL(file);
+    });
+  }
+  async function handlePhotoFiles(fileList) {
+    const files = Array.from(fileList || []).filter(f => /^image\//.test(f.type)).slice(0, 5);
+    if (!files.length) return;
+    els.scan.hidden = false;
+    els.scanMsg.textContent = 'Loading the photo reader — first time takes a moment';
+    try {
+      const T = await OCR.ensure();
+      const lang = els.ocrLang.value || 'eng';
+      const parts = [];
+      for (let i = 0; i < files.length; i++) {
+        els.scanMsg.textContent = files.length > 1 ? 'Reading photo ' + (i + 1) + ' of ' + files.length : 'Reading the photo';
+        const dataUrl = await readAsDataURL(files[i]);
+        const { data } = await T.recognize(dataUrl, lang, m => {
+          if (m.status === 'recognizing text' && m.progress) {
+            const pct = Math.round(m.progress * 100);
+            els.scanMsg.textContent = (files.length > 1 ? 'Photo ' + (i + 1) + '/' + files.length + ' — ' : 'Reading text — ') + pct + '%';
+          }
+        });
+        const t = (data.text || '').replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+        if (t) parts.push(t);
+      }
+      const text = parts.join('\n\n');
+      if (!text) {
+        toast('I could not find readable text in that image — clearer, well-lit photos of typed notes work best.');
+      } else {
+        els.input.value = els.input.value ? els.input.value + '\n\n' + text : text;
+        els.input.dispatchEvent(new Event('input'));
+        const w = text.split(/\s+/).filter(Boolean).length;
+        toast(w + ' words read from your photo. Check the text, fix any slips, then hit “Scan my notes”.');
+        $('#tool').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
+      }
+    } catch (e) {
+      toast('Photo scanning needs internet on its first use — check your connection and try again.');
+    } finally {
+      els.scan.hidden = true;
+    }
+  }
+
   /* ---------------- wiring ---------------- */
   els.btnScan.addEventListener('click', generate);
   els.input.addEventListener('input', () => {
@@ -1396,6 +1516,32 @@ Unemployment counts people in the labor force who are actively seeking work.` }
       toast(s.label + ' sample loaded — hit “Scan my notes”.');
       $('#tool').scrollIntoView({ behavior: REDUCED ? 'auto' : 'smooth', block: 'center' });
     });
+  });
+  els.btnPhoto.addEventListener('click', () => els.photoInput.click());
+  els.photoInput.addEventListener('change', () => {
+    handlePhotoFiles(els.photoInput.files);
+    els.photoInput.value = '';
+  });
+  document.addEventListener('paste', ev => {
+    if (!els.screenHome.classList.contains('active')) return;
+    const items = ev.clipboardData && ev.clipboardData.items;
+    if (!items) return;
+    const imgs = [];
+    for (const it of items) {
+      if (it.kind === 'file' && /^image\//.test(it.type)) imgs.push(it.getAsFile());
+    }
+    if (imgs.length) { ev.preventDefault(); handlePhotoFiles(imgs); }
+  });
+  ['dragenter', 'dragover'].forEach(t => els.input.addEventListener(t, ev => {
+    ev.preventDefault();
+    els.input.classList.add('drag');
+  }));
+  ['dragleave', 'drop'].forEach(t => els.input.addEventListener(t, ev => {
+    ev.preventDefault();
+    els.input.classList.remove('drag');
+  }));
+  els.input.addEventListener('drop', ev => {
+    if (ev.dataTransfer && ev.dataTransfer.files.length) handlePhotoFiles(ev.dataTransfer.files);
   });
   els.btnNext.addEventListener('click', next);
   els.btnQuit.addEventListener('click', () => { document.body.classList.remove('revenge'); go(els.screenHome); });
